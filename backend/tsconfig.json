@@ -1,0 +1,46 @@
+{
+  "compilerOptions": {
+    /* Base Options */
+    "target": "ES2023", // Defines which version of JavaScript the code is compiled down to.
+    "module": "NodeNext", // Tells TypeScript to generate JavaScript code that follows the latest Node.js standards for how files interact using import and export statements.
+    "moduleResolution": "NodeNext", // forces TypeScript to look for your files and libraries using the exact same strict rules that the Node.js runtime uses, ensuring your code doesn't break after it is compiled.
+    "lib": ["ES2023"], // Tells TypeScript which built-in features (like Promises) it should recognize.
+
+    /* Strictness & Best Practices */
+    "strict": true, // Enables "hard mode" to prevent common bugs by forcing clear type definitions.
+    "noUnusedLocals": true, // Errors if a variable is declared but never used (keeps code clean).
+    "noUnusedParameters": true, // Errors if a function parameter is never used (helps detect unfinished logic).
+
+    /* Project Structure */
+    "outDir": "dist", // The folder where the final, runnable JavaScript files will be placed.
+    "rootDir": "src", // Tells the compiler that your actual source code only exists in the 'src' folder.
+    "allowJs": false, // Disables the use of plain JavaScript files to ensure the entire backend remains strictly typed and consistent.
+    "resolveJsonModule": true, // Allows you to import .json files directly as if they were TypeScript objects.
+
+    /* Compatibility & Performance */
+    "esModuleInterop": true, // Fixes compatibility issues when importing older 'CommonJS' libraries.
+    "skipLibCheck": true, // Speeds up compilation by skipping type checks of your installed libraries (node_modules).
+    "incremental": true, // Saves information about the last build to make the next compilation much faster.
+    "sourceMap": true // Creates .map files that link your compiled code back to your original code for debugging.
+  },
+  "include": ["src/**/*"], // Tells TypeScript to only look for files inside the 'src' folder.
+  "exclude": ["node_modules", "dist", "prisma"] // Prevents the compiler from wasting time searching through library code, build outputs, or tool-generated files.
+}
+
+/*
+In a lot of tutorials (that show code examples that won't be in production), you'll see this option:
+"moduleResolution": "bundler"
+This option allows to omit file extensions (like .js or .ts). It is useful for development. But if you want to ship your code for production, do not use it!
+Ultimately, your code will run directly on Node.js (Node.js executes .js files, it does not understand .ts), not inside a browser bundle. Node.js is very strict about how it finds files.
+If your TypeScript settings are too "lenient" (which bundler is), you might write code that works perfectly during development but crashes when you try to run the final compiled version in production.
+
+"moduleResolution": "NodeNext"
+This is the "strict" mode for modern Node.js environments.
+It forces you to use the same rules Node.js uses, such as requiring explicit file extensions in your import statements (e.g., import { user } from './models/user.js').
+By using NodeNext, you ensure that the way TypeScript "sees" your files matches exactly how the Node.js engine will "see" them at runtime.
+
+Conclusion:
+We use "NodeNext" from the start. It means we must include .js extension in the import paths, even though we are writing .ts files.
+This feels strange, but it is the standard for modern TypeScript Node.js development.
+(The text is from gemini, i don't know the standard)
+*/

@@ -1,0 +1,62 @@
+# Caddy handles SSL certificates automatically by default. It asks a public body like Let's Encrypt to issue a certificate for the domain.
+
+{
+    # Server Name Indication (SNI) is an extension to the TLS protocol that allows a client to indicate which hostname it is trying to connect to at the start of the handshake process. This is crucial for hosting multiple SSL certificates on the same IP address and port.
+	# The default_sni directive specifically handles cases where the client does not provide SNI information. By setting default_sni to your current IP address, you ensure that Caddy can still serve the correct certificate (or at least respond appropriately) even if the client doesn't specify a hostname. This is particularly important for clients that do not support SNI or for certain internal network configurations.
+	# If you use raw ip addresses to access the server, you have to set default_sni to your current IP address. Otherwise, Caddy won't know which certificate to serve and may fail to establish a secure connection, resulting in errors for clients that do not support SNI or when accessing via IP address.
+	# default_sni 10.13.5.2 # CHANGE THIS TO YOUR CURRENT IP ADDRESS
+}
+
+# ENSURE TO UPDATE THE HOSTNAMES BELOW TO MATCH YOUR ACTUAL DOMAIN NAME.
+localhost, snake42.sidneybaumann.dev, snake42.com, c3r4s3.42lausanne.ch {
+
+	# For internal use (like in evaluation), we use Caddy's internal CA to issue self-signed certificates. This allows us to have HTTPS without needing a public certificate.
+    # If you remove tls internal, Caddy falls back to automatic HTTPS: For public hostnames like snake42.com, it will try to get a real certificate from an ACME CA (e.g., Let’s Encrypt). If that fails (DNS not pointing, not publicly reachable), HTTPS won’t come up and you’ll only get HTTP.
+    # For localhost addresses, Caddy can still issue an internal cert automatically, but without tls internal you lose the explicit “always use the internal CA” behavior and may see HTTPS disabled if automatic HTTPS is turned off or fails.
+    # Dropping tls internal risks losing HTTPS on snake42.com (and possibly for the localhost:3001/localhost:5601 sites if automatic HTTPS is disabled).
+    tls internal
+
+    # API routes - proxy to backend
+    handle /api/* {
+        reverse_proxy app:3000
+    }
+
+    # Health check endpoint
+    handle /healthcheck {
+        reverse_proxy app:3000
+    }
+
+    # Metrics endpoint blocked
+    handle /metrics {
+        respond "Access denied" 403
+    }
+
+    # Serve static files from the frontend build directory. Must be the last handler to allow API and doc routes to be processed first
+    handle {
+        root * /var/www/frontend/dist
+        try_files {path} /index.html      # For SPA routing, serve index.html for any path that doesn't match a static file
+        file_server
+    }
+}
+
+:3001 {
+    reverse_proxy grafana:3000
+    tls internal
+}
+
+:5601 {
+    reverse_proxy kibana:5601
+    tls internal
+}
+
+:3002 {
+    handle /documentation* {
+        reverse_proxy app:3000
+    }
+    tls internal
+}
+
+# Redirect HTTP to HTTPS. 'permanent' informs browsers and search engines that HTTPS should be used in the future.
+http://localhost, http://snake42.com, http://snake42.sidneybaumann.dev, http://c3r4s3.42lausanne.ch {
+    redir https://{host}:8443{uri} permanent
+}
