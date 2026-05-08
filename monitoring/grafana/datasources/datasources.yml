@@ -1,0 +1,26 @@
+# Environment Variable Expansion is usually enabled in Grafana configuration (grafana.ini)
+apiVersion: 1
+
+datasources:
+
+  - name: Prometheus
+    type: prometheus
+    url: http://prometheus:9090
+    access: proxy
+    editable: false
+    jsonData:
+      httpMethod: POST              # Use POST for queries to handle large query payloads and avoid URL length limitations.
+      manageAlerts: true 
+
+  - name: Postgres
+    type: postgres
+    url: db:5432                    # Do not add 'http://'. PostgreSQL does not communicate over HTTP; it uses its own wire protocol.
+    user: ${RO_USER}
+    secureJsonData:
+      password: ${RO_PASSWORD}
+    jsonData:
+      database: $POSTGRES_DB
+      sslmode: 'disable'
+      maxOpenConns: 10
+      maxIdleConns: 2
+      connMaxLifetime: 3600

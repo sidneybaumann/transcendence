@@ -1,0 +1,77 @@
+### Get all Users
+GET http://localhost:3000/api/users HTTP/1.1
+
+
+#------ register -------#
+
+### Valid input
+POST http://localhost:3000/api/users/register HTTP/1.1
+content-type: application/json
+
+{
+    "name": "bob",
+    "email": "bob3@hotmail.com",
+    "password": "Password123!"
+}
+
+### Invalid mail
+POST http://localhost:3000/api/users/register HTTP/1.1
+content-type: application/json
+
+{
+    "name": "bob",
+    "email": "not-an-email",
+    "password": "Password123!"
+}
+
+### Invalid password
+POST http://localhost:3000/api/users/register HTTP/1.1
+content-type: application/json
+
+{
+    "name": "bob",
+    "email": "bob@hotmail.com",
+    "password": "Password123"
+}
+
+
+#------ csrf -------#
+###
+GET http://localhost:3000/api/users/csrf HTTP/1.1
+
+
+
+#------ login -------#
+
+### Valid input
+POST http://localhost:3000/api/users/login HTTP/1.1
+content-type: application/json
+
+{
+    "email": "bob@hotmail.com",
+    "password": "Password123!"
+}
+
+### user does not exist
+POST http://localhost:3000/api/users/login HTTP/1.1
+content-type: application/json
+
+{
+    "email": "doesnotexist@hotmail.com",
+    "password": "Password123!"
+}
+
+### invalid email format
+POST http://localhost:3000/api/users/login HTTP/1.1
+content-type: application/json
+
+{
+    "email": "lala",
+    "password": "Password123!"
+}
+
+#------ logout -------#
+
+### When logging in, copy the value of the header 'set-cookie' and paste it here, then send request
+POST http://localhost:3000/api/users/logout HTTP/1.1
+Cookie: accessToken=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6ImNtbTF6ZndlYzAwMDB1eHBwb2dmaHowbzIiLCJlbWFpbCI6ImJvYkBob3RtYWlsLmNvbSIsIm5hbWUiOiJib2IiLCJpYXQiOjE3NzIwMjQyMDQsImV4cCI6MTgwMzU4MTgwNH0.2IVzyijwWqbS3JbWOo3JXz7ddlmfzhCJOMVSbEUMaLE.R9bm609gK%2F2e2C96hsVrFC8lmxEuedouQY%2BBWy%2FCpDw

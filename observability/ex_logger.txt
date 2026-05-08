@@ -1,0 +1,39 @@
+await logEvent({
+  dataset: "auth",
+  level: "info",
+  message: "Login succeeded",
+  userId: user.id,
+  requestId,
+});
+
+await logEvent({
+  dataset: "errors",
+  level: "error",
+  message: "Database query failed",
+  requestId,
+  extra: { route: "/api/profile" }
+});
+
+await logEvent({
+  dataset: "game",
+  level: "info",
+  message: "Match created",
+  userId: creatorId,
+  extra: { matchId }
+});
+
+{
+  "@timestamp": "2026-03-17T10:15:00.123Z",
+  "message": "Login succeeded",
+  "log.level": "info",
+  "service.name": "backend",
+  "event.dataset": "auth",
+  "event.action": "login_success",
+  "request.id": "req-123",
+  "user.id": "42",
+  "http.request.method": "POST",
+  "url.path": "/api/auth/login",
+  "client.ip": "127.0.0.1",
+  "labels.env": "dev",
+  "labels.source": "ft_transcendence"
+}

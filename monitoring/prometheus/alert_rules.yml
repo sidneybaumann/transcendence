@@ -1,0 +1,47 @@
+groups:
+  - name: transcendence_alerts
+    rules:
+      
+      - alert: ServerDown
+        expr: up{job="our_beautiful_server"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: 'our_beautiful_server is down'
+          description: 'our_beautiful_server has been down for more than 1 minute.'
+
+      - alert: HighHeapUtilization
+        expr: (nodejs_heap_size_used_bytes / nodejs_heap_size_limit_bytes > 0.7) and (time() - process_start_time_seconds > 300)
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'High heap usage for {{ $labels.instance }}'
+          description: 'Node.js heap use is above 70% for 5m. Current ratio: {{ $value }}'
+
+      - alert: HighHeapUtilizationCritical
+        expr: (nodejs_heap_size_used_bytes / nodejs_heap_size_limit_bytes > 0.9) and (time() - process_start_time_seconds > 300)
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: 'Critical heap usage for {{ $labels.instance }}'
+          description: 'Node.js heap use is above 90% for 2m. Current ratio: {{ $value }}'
+
+      - alert: PossibleMemoryLeak
+        expr: delta(process_resident_memory_bytes[15m]) > 2e8 and (time() - process_start_time_seconds > 900) # Ensure process has been running at least 15 minutes
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: 'Possible memory leak on {{ $labels.instance }}'
+          description: 'RSS grew by >200MB over 15m. Current growth: {{ $value }} bytes'
+
+      - alert: DiskFillingUp
+        expr: node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"} < 0.1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Disk space low (< 10%)"
