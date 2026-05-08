@@ -1,0 +1,291 @@
+# DELETE containers, volumes, networks of docker-compose.dev.yml before launching this.
+
+services:
+  caddy:
+    container_name: caddy
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: caddy
+    restart: unless-stopped
+    ports:
+      - 8443:443
+      - 8080:80
+      - 127.0.0.1:3001:3001
+      - 127.0.0.1:5601:5601
+      - 127.0.0.1:3002:3002
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - transcendence
+
+  app:
+    container_name: app
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runner            # Use the runner stage which has the production build of the app
+    restart: unless-stopped
+    environment:                # these are passed to the app at runtime, not build time
+      - NODE_ENV=${NODE_ENV}
+      - DATABASE_URL=${DATABASE_URL}
+      - JWT_SECRET=${JWT_SECRET}
+      - JWT_EXPIRATION=${JWT_EXPIRATION}
+      - COOKIE_SECRET=${COOKIE_SECRET}
+      - SMTP_HOST=${SMTP_HOST}
+      - SMTP_PORT=${SMTP_PORT}
+      - SMTP_SECURE=${SMTP_SECURE}
+      - SMTP_FROM=${SMTP_FROM}
+      - FRONTEND_URL=${FRONTEND_URL}
+      - LOGSTASH_URL=${LOGSTASH_URL}
+      - TWO_FACTOR_ENCRYPTION_KEY=${TWO_FACTOR_ENCRYPTION_KEY}
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
+      - GOOGLE_REDIRECT_URI=${GOOGLE_REDIRECT_URI}
+      - RESEND_API_KEY=${RESEND_API_KEY}
+      - EMAIL_FROM=${EMAIL_FROM}
+      - EMAIL_PROVIDER=${EMAIL_PROVIDER}
+    expose:
+      - 3000
+    depends_on:
+      - db
+    networks:
+      - transcendence
+
+  prisma-studio:
+    container_name: prisma-studio
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: builder
+    profiles: ["studio"]
+    restart: unless-stopped
+    command: >
+      sh -c "pnpm -C backend exec prisma studio
+      --port 5555
+      --browser none"
+    ports:
+      - 127.0.0.1:5555:5555
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+    depends_on:
+      - db
+    networks:
+      - transcendence
+
+  db:
+    container_name: db
+    image: postgres:15-alpine
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
+      - RO_USER=${RO_USER}
+      - RO_PASSWORD=${RO_PASSWORD}
+    expose:
+      - 5432
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init_ro_user.sh:/docker-entrypoint-initdb.d/init_ro_user.sh   # postgres automatically executes scripts in this directory on startup
+    networks:
+      - transcendence
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.19.12
+    container_name: elasticsearch
+    restart: unless-stopped
+    profiles: ["observability"]
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "true"
+      bootstrap.memory_lock: "false"
+      ELASTIC_PASSWORD: ${ELASTIC_PASSWORD}
+      ES_JAVA_OPTS: "-Xms256m -Xmx256m"
+    mem_limit: 750m
+    volumes:
+      - esdata:/usr/share/elasticsearch/data
+    expose:
+      - 9200
+    networks:
+      - transcendence
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.19.12
+    container_name: kibana
+    restart: unless-stopped
+    profiles: ["observability"]
+    depends_on:
+      - elasticsearch
+    environment:
+      KIBANA_SYSTEM_PASSWORD: ${KIBANA_SYSTEM_PASSWORD}
+      NODE_OPTIONS: "--max-old-space-size=512"
+    mem_limit: 750m
+    volumes:
+      - ./observability/kibana/kibana.yml:/usr/share/kibana/config/kibana.yml:ro
+    expose:
+      - 5601
+    networks:
+      - transcendence
+
+  logstash:
+    image: docker.elastic.co/logstash/logstash:8.19.12
+    container_name: logstash
+    restart: unless-stopped
+    profiles: ["observability"]
+    depends_on:
+      - elasticsearch
+    environment:
+      ELASTIC_PASSWORD: ${ELASTIC_PASSWORD}
+      LS_JAVA_OPTS: "-Xms256m -Xmx256m"
+    mem_limit: 750m
+    volumes:
+      - ./observability/logstash/config/logstash.yml:/usr/share/logstash/config/logstash.yml:ro
+      - ./observability/logstash/pipeline/logstash.conf:/usr/share/logstash/pipeline/logstash.conf:ro
+    expose:
+      - 8080
+    networks:
+      - transcendence
+
+  prometheus:
+    image: prom/prometheus:v3.10.0
+    container_name: prometheus
+    restart: unless-stopped
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=14d"
+      - "--storage.tsdb.retention.size=2GB"
+    volumes:
+      - prometheus_data:/prometheus
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./monitoring/prometheus/alert_rules.yml:/etc/prometheus/alert_rules.yml
+    expose:
+      - 9090
+    networks:
+      - transcendence
+
+  alertmanager:
+    image: prom/alertmanager:v0.28.0
+    container_name: alertmanager
+    restart: unless-stopped
+    command:
+      - '--config.file=/etc/alertmanager/alertmanager.yml'
+      - '--storage.path=/alertmanager'
+    configs:
+      - source: alertmanager_config
+        target: /etc/alertmanager/alertmanager.yml
+    volumes:
+      - alertmanager-data:/alertmanager
+    expose:
+      - 9093
+    networks:
+      - transcendence
+    depends_on:
+      - prometheus
+
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter:v0.19.1
+    container_name: postgres-exporter
+    restart: unless-stopped
+    environment:
+      - DATA_SOURCE_NAME=postgresql://${RO_USER}:${RO_PASSWORD}@db:5432/${POSTGRES_DB}?sslmode=disable
+    expose:
+      - 9187
+    networks:
+      - transcendence
+
+  node-exporter:
+    image: prom/node-exporter:v1.10.2
+    container_name: node-exporter
+    restart: unless-stopped
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command:
+      - "--path.procfs=/host/proc"
+      - "--path.sysfs=/host/sys"
+      - "--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)"
+    expose:
+      - 9100
+    networks:
+      - transcendence
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.54.1
+    container_name: cadvisor
+    restart: unless-stopped
+    expose:
+      - 8080
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+    networks:
+      - transcendence
+
+  grafana:
+    image: grafana/grafana:12.4
+    container_name: grafana
+    restart: unless-stopped
+    environment:
+      - POSTGRES_DB=${POSTGRES_DB}
+      - RO_USER=${RO_USER}
+      - RO_PASSWORD=${RO_PASSWORD}
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_USER}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD}
+      - GF_AUTH_ANONYMOUS_ENABLED=false
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_SECURITY_DISABLE_GRAVATAR=true
+    expose:
+      - 3000
+    volumes:
+      - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources
+      - ./monitoring/grafana/provisioning/dashboards/dashboards.yml:/etc/grafana/provisioning/dashboards/dashboards.yml
+      - ./monitoring/grafana/provisioning/dashboards/json:/etc/grafana/provisioning/dashboards/json
+      - grafana_data:/var/lib/grafana
+    networks:
+      - transcendence
+
+volumes:
+  caddy_data:
+  caddy_config:
+  postgres_data:
+  prometheus_data:
+  alertmanager-data:
+  grafana_data:
+  esdata:
+
+networks:
+  transcendence:
+
+configs:
+  alertmanager_config:
+    content: |
+      global:
+        resolve_timeout: 5m
+
+      route:
+        group_by: ["alertname"]
+        group_wait: 10s
+        group_interval: 10s
+        repeat_interval: 1h
+        receiver: "discord_personal"
+
+      receivers:
+        - name: "discord_personal"
+          discord_configs:
+            - webhook_url: "${DISCORD_WEBHOOK_URL:-https://discord.com/api/webhooks/000/placeholder}"
+              send_resolved: true
+              title: "ALERT: {{ .CommonLabels.alertname }}"
+              message: |
+                {{ range .Alerts }}
+                **Summary:** {{ .Annotations.summary }}
+                **Description:** {{ .Annotations.description }}
+                **Severity:** {{ .Labels.severity }}
+                {{ end }}

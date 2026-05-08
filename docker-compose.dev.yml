@@ -1,0 +1,247 @@
+services:
+  app:
+    container_name: app
+    image: mcr.microsoft.com/devcontainers/typescript-node:4.0.6-24-bookworm
+    environment:
+      - NODE_ENV=${NODE_ENV}
+      - DATABASE_URL=${DATABASE_URL}
+      - JWT_SECRET=${JWT_SECRET}
+      - JWT_EXPIRATION=${JWT_EXPIRATION}
+      - COOKIE_SECRET=${COOKIE_SECRET}
+      - SMTP_HOST=${SMTP_HOST}
+      - SMTP_PORT=${SMTP_PORT}
+      - SMTP_SECURE=${SMTP_SECURE}
+      - SMTP_FROM=${SMTP_FROM}
+      - FRONTEND_URL=${FRONTEND_URL}
+      - LOGSTASH_URL=${LOGSTASH_URL}
+      - TWO_FACTOR_ENCRYPTION_KEY=${TWO_FACTOR_ENCRYPTION_KEY}
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
+      - GOOGLE_REDIRECT_URI=${GOOGLE_REDIRECT_URI}
+      - RESEND_API_KEY=${RESEND_API_KEY}
+      - EMAIL_FROM=${EMAIL_FROM}
+      - EMAIL_PROVIDER=${EMAIL_PROVIDER}
+    ports:
+      - 3000:3000
+      - 5173:5173
+    volumes:
+      - .:/workspace
+    depends_on:
+      - db
+    working_dir: /workspace
+    command: sleep infinity
+    networks:
+      - transcendence
+
+  db:
+    container_name: db
+    image: postgres:15-alpine
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
+      - RO_USER=${RO_USER}
+      - RO_PASSWORD=${RO_PASSWORD}
+    ports:
+      - 5432:5432
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init_ro_user.sh:/docker-entrypoint-initdb.d/init_ro_user.sh   # postgres automatically executes scripts in this directory on startup
+    networks:
+      - transcendence
+
+  mailpit:
+    image: axllent/mailpit:v1.29.3
+    container_name: mailpit
+    restart: unless-stopped
+    ports:
+      - 8025:8025
+    networks:
+      - transcendence
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.19.12
+    container_name: elasticsearch
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "true"
+      bootstrap.memory_lock: "false"
+      ELASTIC_PASSWORD: ${ELASTIC_PASSWORD}
+    volumes:
+      - esdata:/usr/share/elasticsearch/data
+    ports:
+      - 9200:9200
+    networks:
+      - transcendence
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.19.12
+    container_name: kibana
+    depends_on:
+      - elasticsearch
+    environment:
+      KIBANA_SYSTEM_PASSWORD: ${KIBANA_SYSTEM_PASSWORD}
+    volumes:
+      - ./observability/kibana/kibana.yml:/usr/share/kibana/config/kibana.yml:ro
+    ports:
+      - 5601:5601
+    networks:
+      - transcendence
+
+  logstash:
+    image: docker.elastic.co/logstash/logstash:8.19.12
+    container_name: logstash
+    depends_on:
+      - elasticsearch
+    environment:
+      ELASTIC_PASSWORD: ${ELASTIC_PASSWORD}
+    volumes:
+      - ./observability/logstash/config/logstash.yml:/usr/share/logstash/config/logstash.yml:ro
+      - ./observability/logstash/pipeline/logstash.conf:/usr/share/logstash/pipeline/logstash.conf:ro
+    ports:
+      - 127.0.0.1:8080:8080
+    networks:
+      - transcendence
+
+  prometheus:
+    image: prom/prometheus:v3.10.0
+    container_name: prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=14d"
+      - "--storage.tsdb.retention.size=2GB"
+    volumes:
+      - prometheus_data:/prometheus
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./monitoring/prometheus/alert_rules.yml:/etc/prometheus/alert_rules.yml
+    ports:
+      - 9090:9090
+    networks:
+      - transcendence
+
+  alertmanager:
+    image: prom/alertmanager:v0.28.0
+    container_name: alertmanager
+    command:
+      - '--config.file=/etc/alertmanager/alertmanager.yml'
+      - '--storage.path=/alertmanager'
+    configs:
+      - source: alertmanager_config
+        target: /etc/alertmanager/alertmanager.yml
+    volumes:
+      - alertmanager-data:/alertmanager
+    ports:
+      - '9093:9093'
+    networks:
+      - transcendence
+    depends_on:
+      - prometheus
+
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter:v0.19.1
+    container_name: postgres-exporter
+    environment:
+      - DATA_SOURCE_NAME=postgresql://${RO_USER}:${RO_PASSWORD}@db:5432/${POSTGRES_DB}?sslmode=disable
+    ports:
+      - 9187:9187
+    networks:
+      - transcendence
+
+  node-exporter:
+    image: prom/node-exporter:v1.10.2
+    container_name: node-exporter
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command:
+      - "--path.procfs=/host/proc"
+      - "--path.sysfs=/host/sys"
+      - "--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)"
+    ports:
+      - 9100:9100
+    networks:
+      - transcendence
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.54.1
+    container_name: cadvisor
+    ports:
+      - 8081:8080
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+    networks:
+      - transcendence
+
+  grafana:
+    image: grafana/grafana:12.4
+    container_name: grafana
+    environment:
+      - POSTGRES_DB=${POSTGRES_DB}
+      - RO_USER=${RO_USER}
+      - RO_PASSWORD=${RO_PASSWORD}
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
+      - GF_AUTH_ANONYMOUS_ENABLED=false
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_SECURITY_DISABLE_GRAVATAR=true
+    ports:
+      - 3001:3000
+    volumes:
+      - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources
+      - ./monitoring/grafana/provisioning/dashboards/dashboards.yml:/etc/grafana/provisioning/dashboards/dashboards.yml
+      - ./monitoring/grafana/provisioning/dashboards/json:/etc/grafana/provisioning/dashboards/json
+      - grafana_data:/var/lib/grafana
+    networks:
+      - transcendence
+
+volumes:
+  postgres_data:
+  prometheus_data:
+  alertmanager-data:
+  grafana_data:
+  esdata:
+
+networks:
+  transcendence:
+
+# REMOVE "routes: ... InstanceDown ..." for prod
+configs:
+  alertmanager_config:
+    content: |
+      global:
+        resolve_timeout: 5m
+
+      route:
+        group_by: ["alertname"]
+        group_wait: 10s
+        group_interval: 10s
+        repeat_interval: 1h
+        receiver: "discord_personal"
+        routes:
+          - matchers:
+              - alertname = "ServerDown"
+            receiver: "dev-null"
+
+      receivers:
+        - name: "discord_personal"
+          discord_configs:
+            - webhook_url: "${DISCORD_WEBHOOK_URL:-https://discord.com/api/webhooks/000/placeholder}"
+              send_resolved: true
+              title: "ALERT: {{ .CommonLabels.alertname }}"
+              message: |
+                {{ range .Alerts }}
+                **Summary:** {{ .Annotations.summary }}
+                **Description:** {{ .Annotations.description }}
+                **Severity:** {{ .Labels.severity }}
+                {{ end }}
+
+        - name: "dev-null"
+          webhook_configs:
+            - url: "http://127.0.0.1:1/"
+              send_resolved: true
